@@ -1,11 +1,11 @@
 use std::env;
-use std::fs::{File, read};
+use std::fs::File;
 use std::io::{self, prelude::*, BufReader};
 use std::sync::atomic::{AtomicU64, Ordering};
+use stopwatch::Stopwatch;
 use rayon::prelude::*;
 use sha1::Sha1;
 use hmac::Hmac;
-use stopwatch::{Stopwatch};
 
 const PRINT_INTERVAL: u64 = 10000000;
 
