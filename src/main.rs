@@ -26,13 +26,13 @@ fn main() -> io::Result<()> {
 
 	rayon::ThreadPoolBuilder::new().num_threads(num_threads).build_global().unwrap();
 	
-	let num_checked: AtomicU64 = AtomicU64::new(0);
+	let num_checked = AtomicU64::new(0);
 	let sw = Stopwatch::start_new();
 	
 	reader.lines().par_bridge().for_each(|line| -> () {
 		match line {
 			Ok(pass) => {
-				let mut try_key: [u8; 16] = [0; 16];
+				let mut try_key = [0u8; 16];
 				pbkdf2::pbkdf2::<Hmac<Sha1>>(pass.as_bytes(), &salt[..], iterations, &mut try_key);
 				//println!("{}", pass);
 				//num_checked.fetch_add(1, Ordering::SeqCst);
