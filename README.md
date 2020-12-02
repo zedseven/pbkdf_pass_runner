@@ -1,5 +1,5 @@
 # pbkdf_pass_runner
-Runs through a word list and tries all entries as passwords with a given salt for an AES PBKDF2 SHA-1 implementation, checking if they generate a matching given key.
+Runs through a word list and tries all entries as passwords with a given salt for an PBKDF2 SHA-1 implementation, checking if they generate a matching given key.
 
 ## Usage
 ```

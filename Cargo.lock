@@ -261,11 +261,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b3b8c0d71734018084da0c0354193a5edfb81b20d2d57a92c5b154aefc554a4a"
 dependencies = [
  "crypto-mac",
+ "rayon",
 ]
 
 [[package]]
 name = "pbkdf_pass_runner"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "hmac",
  "pbkdf2",

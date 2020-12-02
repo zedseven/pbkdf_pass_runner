@@ -7,11 +7,11 @@ use std::io::{self, prelude::*, BufReader};
 use std::sync::atomic::{AtomicU64, Ordering};
 use stopwatch::Stopwatch;
 
-const PRINT_INTERVAL: u64 = 10000000;
+//const PRINT_INTERVAL: u64 = 10000000;
 
 fn main() -> io::Result<()> {
 	let args: Vec<String> = env::args().collect();
-	if args.len() < 6 {
+	if args.len() < 7 {
 		println!("args: <num_threads> <salt (hex string)> <iterations = 20> <compare_key (hex string)> <word_list_path>");
 		return Ok(());
 	}
@@ -19,7 +19,8 @@ fn main() -> io::Result<()> {
 	let salt = &parse_hex(&args[2])[..];
 	let iterations = args[3].parse::<u32>().unwrap();
 	let compare_key = &parse_hex(&args[4])[..];
-	let word_list_path = &args[5];
+	let delimiter = parse_hex(&args[5])[0];
+	let word_list_path = &args[6];
 
 	let file = File::open(word_list_path)?;
 	let reader = BufReader::new(file);
@@ -32,22 +33,40 @@ fn main() -> io::Result<()> {
 	let num_checked = AtomicU64::new(0);
 	let sw = Stopwatch::start_new();
 
-	match reader.lines().par_bridge().find_any(|line| -> bool {
+	let passes = Passes {
+		delimiter,
+		buf: reader,
+	};
+	match passes.par_bridge().find_any(|line| -> bool {
 		match line {
 			Ok(pass) => {
 				let mut try_key = [0u8; 16];
-				pbkdf2::pbkdf2::<Hmac<Sha1>>(pass.as_bytes(), &salt, iterations, &mut try_key);
-				num_checked.fetch_add(1, Ordering::SeqCst);
-				//let num_checked_now = num_checked.fetch_add(1, Ordering::SeqCst) + 1;
-				//if num_checked_now % PRINT_INTERVAL == 0 {
-				//	println!("Checked: {} words - at \"{}\"", num_checked_now, pass);
-				//}
+				pbkdf2::pbkdf2::<Hmac<Sha1>>(pass, &salt, iterations, &mut try_key);
+				num_checked.fetch_add(1, Ordering::Relaxed);
+				/*let num_checked_now = num_checked.fetch_add(1, Ordering::SeqCst) + 1;
+				if num_checked_now % PRINT_INTERVAL == 0 {
+					println!("Checked: {} words", num_checked_now);
+				}*/
 				return try_key.eq(compare_key);
 			}
 			_ => false,
 		}
 	}) {
-		Some(pass) => println!("Password: {}", pass.unwrap()),
+		Some(pass) => {
+			let pass_res = pass.unwrap();
+			let mut renderable = true;
+			for i in pass_res.iter() {
+				if *i < b'0' || *i > b'z' {
+					renderable = false;
+					break;
+				}
+			}
+			if renderable {
+				println!("Password: {}", String::from_utf8_lossy(&pass_res));
+			} else {
+				println!("Password: {:?}", pass_res);
+			}
+		}
 		_ => (),
 	}
 
@@ -67,6 +86,39 @@ fn main() -> io::Result<()> {
 		);
 	}
 	Ok(())
+}
+
+struct Passes<B> {
+	delimiter: u8,
+	buf: B,
+}
+
+impl<B: BufRead> Passes<B> {
+	pub fn new(delimiter: u8, buf: B) -> Passes<B> {
+		Passes { delimiter, buf }
+	}
+}
+
+impl<B: BufRead> Iterator for Passes<B> {
+	type Item = io::Result<Vec<u8>>;
+
+	fn next(&mut self) -> Option<io::Result<Vec<u8>>> {
+		let mut buf = Vec::new();
+		match self.buf.read_until(self.delimiter, &mut buf) {
+			Ok(0) => None,
+			Ok(_n) => {
+				if buf.ends_with(&[self.delimiter]) {
+					buf.pop();
+					/*// Not too pleased with this, but it means massive 100+GB dictionaries don't have to be converted to Unix line endings
+					if buf.ends_with(&[b'\r']) {
+						buf.pop();
+					}*/
+				}
+				Some(Ok(buf))
+			}
+			Err(e) => Some(Err(e)),
+		}
+	}
 }
 
 // Written by Jake Goulding
