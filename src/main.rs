@@ -1,4 +1,5 @@
 use hmac::Hmac;
+use rayon::current_num_threads;
 use rayon::prelude::*;
 use sha1::Sha1;
 use std::env;
@@ -12,7 +13,7 @@ use stopwatch::Stopwatch;
 fn main() -> io::Result<()> {
 	let args: Vec<String> = env::args().collect();
 	if args.len() < 7 {
-		println!("args: <num_threads> <salt (hex string)> <iterations = 20> <compare_key (hex string)> <word_list_path>");
+		println!("args: <num_threads> <salt (hex string)> <iterations = 20> <compare_key (hex string)> <delimiter = 0a> <word_list_path>");
 		return Ok(());
 	}
 	let num_threads = args[1].parse::<usize>().unwrap();
@@ -33,10 +34,7 @@ fn main() -> io::Result<()> {
 	let num_checked = AtomicU64::new(0);
 	let sw = Stopwatch::start_new();
 
-	let passes = Passes {
-		delimiter,
-		buf: reader,
-	};
+	let mut passes = Passes::new(delimiter, reader);
 	match passes.par_bridge().find_any(|line| -> bool {
 		match line {
 			Ok(pass) => {
@@ -91,21 +89,22 @@ fn main() -> io::Result<()> {
 struct Passes<B> {
 	delimiter: u8,
 	buf: B,
+	pool: Vec<Vec<u8>>,
 }
 
 impl<B: BufRead> Passes<B> {
 	pub fn new(delimiter: u8, buf: B) -> Passes<B> {
-		Passes { delimiter, buf }
+		Passes {
+			delimiter,
+			buf,
+			pool: vec![],
+		}
 	}
-}
 
-impl<B: BufRead> Iterator for Passes<B> {
-	type Item = io::Result<Vec<u8>>;
-
-	fn next(&mut self) -> Option<io::Result<Vec<u8>>> {
+	pub fn add_to_pool(&mut self) -> io::Result<u8> {
 		let mut buf = Vec::new();
 		match self.buf.read_until(self.delimiter, &mut buf) {
-			Ok(0) => None,
+			Ok(0) => Ok(0),
 			Ok(_n) => {
 				if buf.ends_with(&[self.delimiter]) {
 					buf.pop();
@@ -114,9 +113,28 @@ impl<B: BufRead> Iterator for Passes<B> {
 						buf.pop();
 					}*/
 				}
-				Some(Ok(buf))
+				self.pool.push(buf);
+				Ok(1)
 			}
-			Err(e) => Some(Err(e)),
+			Err(e) => Err(e),
+		}
+	}
+}
+
+impl<B: BufRead> Iterator for Passes<B> {
+	type Item = io::Result<Vec<u8>>;
+
+	fn next(&mut self) -> Option<io::Result<Vec<u8>>> {
+		if self.pool.len() == 0 {
+			let num_threads = current_num_threads();
+			for _ in 0..(num_threads * 2) {
+				self.add_to_pool();
+			}
+		}
+
+		match self.pool.pop() {
+			Some(res) => Some(Ok(res)),
+			None => None,
 		}
 	}
 }
